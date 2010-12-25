@@ -1,0 +1,13 @@
+Immediate
+---------
+
+- Implement remaining Redis 2.2 commands in hiredispp::Redis
+- Add hiredispp::Redis::executeTx to support Redis transactions
+- Create tests
+
+Future
+------
+
+- Introduce thread safe connection pooling
+- Introduce client side sharding
+- Add hiredis async support
