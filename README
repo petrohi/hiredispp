@@ -16,19 +16,19 @@ Connection to Redis server is represented by hiredispp::Redis class with type sa
 Reply
 -----
 
-Multi-bulk Redis reply is represented by hiredispp::RedisReply type
+Multi-bulk Redis reply is represented by hiredispp::Redis::Reply type
 
-	hiredispp::RedisReply reply = r.keys("foo:*");
+	hiredispp::Redis::Reply reply = r.keys("foo:*");
 	std::vector<std::string> keys;
 	reply.toVector(keys);	
 
 Dynamic Commands
 ----------------
 
-It is possible to issue dynamically created commands with hiredispp::RedisCommand class
+It is possible to issue dynamically created commands with hiredispp::Redis::Command class
 
 	std::vector<std::string> keys;
-	hiredispp::RedisCommand sunionstore("SUNIONSTORE");
+	hiredispp::Redis::Command sunionstore("SUNIONSTORE");
 	sunionstore << "result" << keys;
 	r.execute(sunionstore);
 
@@ -44,17 +44,17 @@ Redis pipelining is enabled by pair of begin/end calls in hiredispp::Redis
 
 	for (...)
 	{
-		boost::int64_t c = r.endCommand();
+		boost::int64_t c = r.endCommand();ng
 	}
 
-Also it possible to pipeline dynamic commands by executing vector of hiredispp::RedisCommand objects
+Also it possible to pipeline dynamic commands by executing vector of hiredispp::Redis::Command objects
 
-	std::vector<hiredispp::RedisCommand> commands;
+	std::vector<hiredispp::Redis::Command> commands;
 	for (...)
 	{	
-		commands.push_back(hiredispp::RedisCommand("SADD") << key << member);
+		commands.push_back(hiredispp::Redis::Command("SADD") << key << member);
 	}
-	std::vector<hiredispp::RedisReply> replies;
+	std::vector<hiredispp::Redis::Reply> replies;
 	r.execute(commands, replies);
 
 Exceptions
@@ -72,3 +72,8 @@ All hiredis library error conditions are thrown as hiredispp::RedisException
 	}
 
 After disconnection it is possible to reuse existing hiredispp::Redis object, it will attempt to restore connection.
+
+UNICODE support
+---------------
+
+hiredispp::Redis has corresponding hiredispp::wRedis template instance that supports std::wstring. UNICODE strings are UTF-8 encoded for Redis.

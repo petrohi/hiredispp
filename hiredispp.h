@@ -1,20 +1,44 @@
-/* hiredispp.h -- a C++ wrapper for hiredis.
+/*
+ * hiredispp.h
  */
 
 #ifndef HIREDISPP_H
 #define HIREDISPP_H
 
-#include <hiredis/hiredis.h>
+#include <string.h>
 #include <string>
+#include <vector>
 #include <stdexcept>
 #include <boost/lexical_cast.hpp>
 #include <boost/cstdint.hpp>
+#include <boost/optional.hpp>
+#include <hiredis/hiredis.h>
 
 namespace hiredispp
 {
-	const std::string Nil = "**NIL**";
+	template<typename CharT>
+	class RedisEncoding
+	{
+	public:
+		static void decode(const char* data, size_t size, std::basic_string<CharT>& string);
+		static void encode(const std::basic_string<CharT>& string, std::string& data);
+	};
 
-	template<class T> class RedisResult;
+	class RedisException : public std::exception
+	{
+		std::string _what;
+
+	public:
+		RedisException(const std::string& what)
+			: _what(what) { }
+
+		virtual ~RedisException() throw() { }
+
+		virtual const char* what() const throw()
+		{
+			return _what.c_str();
+		}
+	};
 
 	class RedisElementBase
 	{
@@ -44,26 +68,73 @@ namespace hiredispp
 		}
 	};
 
-	typedef RedisResult<RedisElementBase> RedisElement;
-
-	template<class T> class RedisResult : public T
+	template<typename CharT>
+	class RedisConst
 	{
+	public:
+		static const std::basic_string<CharT> Nil;
+	};
+
+	template<class T, typename CharT>
+	class RedisResult : private RedisEncoding<CharT>, public T
+	{
+		void checkError() const
+		{
+			if (isError())
+			{
+				RedisException e(std::string(T::get()->str, T::get()->len));
+
+				throw e;
+			}
+		}
+
+		std::basic_string<CharT> getString() const
+		{
+			std::basic_string<CharT> s;
+			decode(T::get()->str, T::get()->len, s);
+			return s;
+		}
+
 	public:
 		RedisResult(redisReply* r)
 			: T(r) { }
 
-		std::string getStatus() const
+		bool isError() const
 		{
+			return (T::get()->type == REDIS_REPLY_ERROR);
+		}
+
+		bool isNil() const
+		{
+			return (T::get()->type == REDIS_REPLY_NIL);
+		}
+
+		std::basic_string<CharT> getErrorMessage() const
+		{
+			if (isError())
+			{
+				return getString();
+			}
+
+			return std::basic_string<CharT>();
+		}
+
+		std::basic_string<CharT> getStatus() const
+		{
+			checkError();
+
 			if (T::get()->type != REDIS_REPLY_STATUS)
 			{
 				throw std::runtime_error("Invalid reply type");
 			}
 
-			return std::string(T::get()->str, T::get()->len);
+			return getString();
 		}
 
-		operator std::string() const
+		operator std::basic_string<CharT>() const
 		{
+			checkError();
+
 			if (
 					T::get()->type != REDIS_REPLY_STRING &&
 					T::get()->type != REDIS_REPLY_NIL)
@@ -71,16 +142,18 @@ namespace hiredispp
 				throw std::runtime_error("Invalid reply type");
 			}
 
-			if (T::get()->type == REDIS_REPLY_NIL)
+			if (isNil())
 			{
-				return Nil;
+				return RedisConst<CharT>::Nil;
 			}
 
-			return std::string(T::get()->str, T::get()->len);
+			return getString();
 		}
 
 		operator boost::int64_t() const
 		{
+			checkError();
+
 			if (T::get()->type != REDIS_REPLY_INTEGER)
 			{
 				throw std::runtime_error("Invalid reply type");
@@ -89,8 +162,29 @@ namespace hiredispp
 			return T::get()->integer;
 		}
 
+		operator boost::optional<boost::int64_t>() const
+		{
+			checkError();
+
+			if (
+					T::get()->type != REDIS_REPLY_INTEGER &&
+					T::get()->type != REDIS_REPLY_NIL)
+			{
+				throw std::runtime_error("Invalid reply type");
+			}
+
+			if (isNil())
+			{
+				return boost::optional<boost::int64_t>();
+			}
+
+			return boost::optional<boost::int64_t>(T::get()->integer);
+		}
+
 		size_t size() const
 		{
+			checkError();
+
 			if (T::get()->type != REDIS_REPLY_ARRAY)
 			{
 				throw std::runtime_error("Invalid reply type");
@@ -99,8 +193,10 @@ namespace hiredispp
 			return T::get()->elements;
 		}
 
-		RedisElement operator[](size_t i) const
+		RedisResult<RedisElementBase, CharT> operator[](size_t i) const
 		{
+			checkError();
+
 			if (T::get()->type != REDIS_REPLY_ARRAY)
 			{
 				throw std::runtime_error("Invalid reply type");
@@ -111,13 +207,13 @@ namespace hiredispp
 				throw std::runtime_error("Out of range");
 			}
 
-			return RedisElement(T::get()->element[i]);
+			return RedisResult<RedisElementBase, CharT>(T::get()->element[i]);
 		}
 
 		template <class V>
 		void toValue(V& v)
 		{
-			v = boost::lexical_cast<V>((std::string)(*this));
+			v = boost::lexical_cast<V>((std::basic_string<CharT>)(*this));
 		}
 
 		template <class V>
@@ -125,7 +221,7 @@ namespace hiredispp
 		{
 			for (size_t i = 0; i < size(); ++i)
 			{
-				v.push_back(boost::lexical_cast<V>((std::string)(*this)[i]));
+				v.push_back(boost::lexical_cast<V>((std::basic_string<CharT>)(*this)[i]));
 			}
 		}
 	};
@@ -188,75 +284,81 @@ namespace hiredispp
 		}
 	};
 
-	typedef RedisResult<RedisReplyBase> RedisReply;
-
-	class RedisException : public std::exception
+	template<typename CharT>
+	class RedisCommandBase : private RedisEncoding<CharT>, public std::vector<std::string>
 	{
-		std::string _what;
+		void append(const std::basic_string<CharT>& s)
+		{
+			std::string data;
+			encode(s, data);
+			push_back(data);
+		}
+
+		void append(const char* s)
+		{
+			std::string data(s, s + ::strlen(s));
+			push_back(data);
+		}
 
 	public:
-		RedisException(const std::string& what)
+		RedisCommandBase(const char* s)
 		{
-			_what = what;
+			append(s);
 		}
 
-		virtual ~RedisException() throw() { }
-
-		virtual const char* what() const throw()
+		RedisCommandBase(const std::basic_string<CharT>& s)
 		{
-			return _what.c_str();
-		}
-	};
-
-	class RedisCommand : public std::vector<std::string>
-	{
-	public:
-		RedisCommand(const std::string& s)
-		{
-			push_back(s);
+			append(s);
 		}
 
-		RedisCommand(const std::vector<std::string>& from)
-			: std::vector<std::string>(from) { }
+		RedisCommandBase(const std::vector<std::vector<char> >& from)
+			: std::vector<std::vector<char> >(from) { }
 
-		RedisCommand& operator=(const std::vector<std::string>& from)
+		RedisCommandBase<CharT>& operator=(const std::vector<std::vector<char> >& from)
 		{
 			*this = from;
 			return *this;
 		}
 
-		RedisCommand& operator<<(const std::string& s)
+		RedisCommandBase<CharT>& operator<<(const std::basic_string<CharT>& s)
 		{
-			push_back(s);
+			append(s);
 			return *this;
 		}
 
-		RedisCommand& operator<<(const std::vector<std::string>& ss)
+		RedisCommandBase<CharT>& operator<<(const char* s)
+		{
+			append(s);
+			return *this;
+		}
+
+		RedisCommandBase<CharT>& operator<<(const std::vector<std::basic_string<CharT> >& ss)
 		{
 			for (size_t i = 0; i < ss.size(); ++i)
 			{
-				push_back(ss[i]);
+				append(ss[i]);
 			}
 
 			return *this;
 		}
 
-		template<class T> RedisCommand& operator<<(const T& v)
+		template<class T> RedisCommandBase<CharT>& operator<<(const T& v)
 		{
-			push_back(boost::lexical_cast<std::string>(v));
+			append(boost::lexical_cast<std::basic_string<CharT> >(v));
 			return *this;
 		}
 	};
 
-	class Redis
+	template<typename CharT>
+	class RedisBase : public RedisConst<CharT>
 	{
 		mutable redisContext* _context;
 
 		std::string _host;
 		int _port;
 
-		Redis(const Redis&);
-		Redis& operator=(const Redis&);
+		RedisBase(const RedisBase<CharT>&);
+		RedisBase<CharT>& operator=(const RedisBase<CharT>&);
 
 		void connect() const
 		{
@@ -276,24 +378,15 @@ namespace hiredispp
 			}
 		}
 
-		RedisReply makeReply(redisReply* r) const
-		{
-			if (r->type == REDIS_REPLY_ERROR)
-			{
-				RedisException e(std::string(r->str, r->len));
-				::freeReplyObject(r);
-
-				throw e;
-			}
-
-			return RedisReply(r);
-		}
-
 	public:
-		Redis(const std::string& host, int port = 6379)
+		typedef RedisCommandBase<CharT> Command;
+		typedef RedisResult<RedisReplyBase, CharT> Reply;
+		typedef RedisResult<RedisElementBase, CharT> Element;
+
+		RedisBase(const std::string& host, int port = 6379)
 			: _context(0), _host(host), _port(port) { }
 
-		virtual ~Redis()
+		virtual ~RedisBase()
 		{
 			if (_context != 0)
 			{
@@ -303,7 +396,7 @@ namespace hiredispp
 			}
 		}
 
-		RedisReply endCommand() const
+		Reply endCommand() const
 		{
 			redisReply* r;
 
@@ -317,7 +410,7 @@ namespace hiredispp
 				throw e;
 			}
 
-			return makeReply(r);
+			return Reply(r);
 		}
 
 		void beginPing() const
@@ -327,7 +420,7 @@ namespace hiredispp
 			::redisAppendCommand(_context, "PING");
 		}
 
-		std::string ping() const
+		std::basic_string<CharT> ping() const
 		{
 			beginPing();
 			return endCommand().getStatus();
@@ -346,191 +439,259 @@ namespace hiredispp
 			endCommand();
 		}
 
-		void beginGet(const std::string& key) const
+		void beginGet(const std::basic_string<CharT>& key) const
 		{
 			connect();
-
-			::redisAppendCommand(_context, "GET %b", key.c_str(), key.size());
+			beginCommand(Command("GET") << key);
 		}
 
-		std::string get(const std::string& key) const
+		std::basic_string<CharT> get(const std::basic_string<CharT>& key) const
 		{
 			beginGet(key);
 			return endCommand();
 		}
 
-		void beginSet(const std::string& key, const std::string& value) const
+		void beginSet(const std::basic_string<CharT>& key, const std::basic_string<CharT>& value) const
 		{
 			connect();
-
-			::redisAppendCommand(_context, "SET %b %b", key.c_str(), key.size(), value.c_str(), value.size());
+			beginCommand(Command("SET") << key << value);
 		}
 
-		void set(const std::string& key, const std::string& value) const
+		void set(const std::basic_string<CharT>& key, const std::basic_string<CharT>& value) const
 		{
 			beginSet(key, value);
 			endCommand();
 		}
 
-		void beginSetnx(const std::string& key, const std::string& value) const
+		void beginSetnx(const std::basic_string<CharT>& key, const std::basic_string<CharT>& value) const
 		{
 			connect();
-
-			::redisAppendCommand(_context, "SETNX %b %b", key.c_str(), key.size(), value.c_str(), value.size());
+			beginCommand(Command("SETNX") << key << value);
 		}
 
-		boost::int64_t setnx(const std::string& key, const std::string& value) const
+		boost::int64_t setnx(const std::basic_string<CharT>& key, const std::basic_string<CharT>& value) const
 		{
 			beginSetnx(key, value);
 			return endCommand();
 		}
 
-		void beginIncr(const std::string& key) const
+		void beginIncr(const std::basic_string<CharT>& key) const
 		{
 			connect();
-
-			::redisAppendCommand(_context, "INCR %b", key.c_str(), key.size());
+			beginCommand(Command("INCR") << key);
 		}
 
-		boost::int64_t incr(const std::string& key) const
+		boost::int64_t incr(const std::basic_string<CharT>& key) const
 		{
 			beginIncr(key);
 			return endCommand();
 		}
 
-		void beginKeys(const std::string& pattern) const
+		void beginKeys(const std::basic_string<CharT>& pattern) const
 		{
 			connect();
-
-			::redisAppendCommand(_context, "KEYS %b", pattern.c_str(), pattern.size());
+			beginCommand(Command("KEYS") << pattern);
 		}
 
-		RedisReply keys(const std::string& pattern) const
+		Reply keys(const std::basic_string<CharT>& pattern) const
 		{
 			beginKeys(pattern);
 			return endCommand();
 		}
 
-		void beginDel(const std::string& key) const
+		void beginDel(const std::basic_string<CharT>& key) const
 		{
 			connect();
-
-			::redisAppendCommand(_context, "DEL %b", key.c_str(), key.size());
+			beginCommand(Command("DEL") << key);
 		}
 
-		boost::int64_t del(const std::string& key) const
+		boost::int64_t del(const std::basic_string<CharT>& key) const
 		{
 			beginDel(key);
 			return endCommand();
 		}
 
-		void beginDel(const std::vector<std::string>& keys) const
+		void beginDel(const std::vector<std::basic_string<CharT> >& keys) const
 		{
 			connect();
-
-			beginCommand(RedisCommand("DEL") << keys);
+			beginCommand(Command("DEL") << keys);
 		}
 
-		boost::int64_t del(const std::vector<std::string>& keys) const
+		boost::int64_t del(const std::vector<std::basic_string<CharT> >& keys) const
 		{
 			beginDel(keys);
 			return endCommand();
 		}
 
-		void beginHget(const std::string& key, const std::string& field) const
+		void beginHget(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field) const
 		{
 			connect();
-
-			::redisAppendCommand(_context, "HGET %b %b", key.c_str(), key.size(), field.c_str(), field.size());
+			beginCommand(Command("HGET") << key << field);
 		}
 
-		std::string hget(const std::string& key, const std::string& field) const
+		std::basic_string<CharT> hget(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field) const
 		{
 			beginHget(key, field);
 			return endCommand();
 		}
 
-		void beginHset(const std::string& key, const std::string& field, const std::string& value) const
+		void beginHset(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field, const std::basic_string<CharT>& value) const
 		{
 			connect();
-
-			::redisAppendCommand(_context, "HSET %b %b %b",
-					key.c_str(), key.size(), field.c_str(), field.size(), value.c_str(), value.size());
+			beginCommand(Command("HSET") << key << field << value);
 		}
 
-		boost::int64_t hset(const std::string& key, const std::string& field, const std::string& value) const
+		boost::int64_t hset(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field, const std::basic_string<CharT>& value) const
 		{
 			beginHset(key, field, value);
 			return endCommand();
 		}
 
-		void beginHincrby(const std::string& key, const std::string& field, boost::int64_t value) const
+		void beginHsetnx(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field, const std::basic_string<CharT>& value) const
 		{
 			connect();
-
-			::redisAppendCommand(_context, "HINCRBY %b %b %d", key.c_str(), key.size(), field.c_str(), field.size(), value);
+			beginCommand(Command("HSETNX") << key << field << value);
 		}
 
-		boost::int64_t hincrby(const std::string& key, const std::string& field, boost::int64_t value) const
+		boost::int64_t hsetnx(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field, const std::basic_string<CharT>& value) const
+		{
+			beginHsetnx(key, field, value);
+			return endCommand();
+		}
+
+		void beginHincrby(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field, boost::int64_t value) const
+		{
+			connect();
+			beginCommand(Command("HINCRBY") << key << field << value);
+		}
+
+		boost::int64_t hincrby(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field, boost::int64_t value) const
 		{
 			beginHincrby(key, field, value);
 			return endCommand();
 		}
 
-		void beginHgetall(const std::string& key) const
+		void beginHgetall(const std::basic_string<CharT>& key) const
 		{
 			connect();
-
-			::redisAppendCommand(_context, "HGETALL %b", key.c_str(), key.size());
+			beginCommand(Command("HGETALL") << key);
 		}
 
-		RedisReply hgetall(const std::string& key) const
+		Reply hgetall(const std::basic_string<CharT>& key) const
 		{
 			beginHgetall(key);
 			return endCommand();
 		}
 
-		void beginSadd(const std::string& key, const std::string& member) const
+		void beginSadd(const std::basic_string<CharT>& key, const std::basic_string<CharT>& member) const
 		{
 			connect();
-
-			::redisAppendCommand(_context, "SADD %b %b", key.c_str(), key.size(), member.c_str(), member.size());
+			beginCommand(Command("SADD") << key << member);
 		}
 
-		boost::int64_t sadd(const std::string& key, const std::string& member) const
+		boost::int64_t sadd(const std::basic_string<CharT>& key, const std::basic_string<CharT>& member) const
 		{
 			beginSadd(key, member);
 			return endCommand();
-
 		}
 
-		void beginSmembers(const std::string& key) const
+		void beginSmembers(const std::basic_string<CharT>& key) const
 		{
 			connect();
-
-			::redisAppendCommand(_context, "SMEMBERS %b", key.c_str(), key.size());
+			beginCommand(Command("SMEMBERS") << key);
 		}
 
-		RedisReply smembers(const std::string& key) const
+		Reply smembers(const std::basic_string<CharT>& key) const
 		{
 			beginSmembers(key);
 			return endCommand();
 		}
 
-		void beginScard(const std::string& key) const
+		void beginScard(const std::basic_string<CharT>& key) const
 		{
 			connect();
-
-			::redisAppendCommand(_context, "SCARD %b", key.c_str(), key.size());
+			beginCommand(Command("SCARD") << key);
 		}
 
-		boost::int64_t scard(const std::string& key) const
+		boost::int64_t scard(const std::basic_string<CharT>& key) const
 		{
-			beginSmembers(key);
+			beginScard(key);
 			return endCommand();
 		}
 
-		void beginCommand(const RedisCommand& command) const
+		void beginZadd(const std::basic_string<CharT>& key, double score, const std::basic_string<CharT>& member) const
+		{
+			connect();
+			beginCommand(Command("ZADD") << key << score << member);
+		}
+
+		boost::int64_t zadd(const std::basic_string<CharT>& key, double score, const std::basic_string<CharT>& member) const
+		{
+			beginZadd(key, score, member);
+			return endCommand();
+		}
+
+		void beginZrank(const std::basic_string<CharT>& key, const std::basic_string<CharT>& member) const
+		{
+			connect();
+			beginCommand(Command("ZRANK") << key << member);
+		}
+
+		boost::optional<boost::int64_t> zrank(const std::basic_string<CharT>& key, const std::basic_string<CharT>& member) const
+		{
+			beginZrank(key, member);
+			return endCommand();
+		}
+
+		void beginZrevrank(const std::basic_string<CharT>& key, const std::basic_string<CharT>& member) const
+		{
+			connect();
+			beginCommand(Command("ZREVRANK") << key << member);
+		}
+
+		boost::optional<boost::int64_t> zrevrank(const std::basic_string<CharT>& key, const std::basic_string<CharT>& member) const
+		{
+			beginZrevrank(key, member);
+			return endCommand();
+		}
+
+		void beginZrange(const std::basic_string<CharT>& key, boost::int64_t start, boost::int64_t end) const
+		{
+			connect();
+			beginCommand(Command("ZRANGE") << key << start << end);
+		}
+
+		Reply zrange(const std::basic_string<CharT>& key, boost::int64_t start, boost::int64_t end) const
+		{
+			beginZrange(key, start, end);
+			return endCommand();
+		}
+
+		void beginZrevrange(const std::basic_string<CharT>& key, boost::int64_t start, boost::int64_t end) const
+		{
+			connect();
+			beginCommand(Command("ZREVRANGE") << key << start << end);
+		}
+
+		Reply zrevrange(const std::basic_string<CharT>& key, boost::int64_t start, boost::int64_t end) const
+		{
+			beginZrevrange(key, start, end);
+			return endCommand();
+		}
+
+		void beginZcard(const std::basic_string<CharT>& key) const
+		{
+			connect();
+			beginCommand(Command("ZCARD") << key);
+		}
+
+		boost::int64_t zcard(const std::basic_string<CharT>& key) const
+		{
+			beginZcard()(key);
+			return endCommand();
+		}
+
+		void beginCommand(const Command& command) const
 		{
 			connect();
 
@@ -539,20 +700,20 @@ namespace hiredispp
 
 			for (size_t i = 0; i < command.size(); ++i)
 			{
-				argv[i] = command[i].c_str();
+				argv[i] = command[i].data();
 				argvlen[i] = command[i].size();
 			}
 
 			::redisAppendCommandArgv(_context, command.size(), argv, argvlen);
 		}
 
-		RedisReply execute(const RedisCommand& command) const
+		Reply execute(const Command& command) const
 		{
 			beginCommand(command);
 			return endCommand();
 		}
 
-		void execute(const std::vector<RedisCommand>& commands, std::vector<RedisReply>& replies) const
+		void execute(const std::vector<Command>& commands, std::vector<Reply>& replies) const
 		{
 			for (size_t i = 0; i < commands.size(); ++i)
 			{
@@ -565,6 +726,22 @@ namespace hiredispp
 			}
 		}
 	};
+
+	typedef RedisBase<char> Redis;
+	typedef RedisBase<wchar_t> wRedis;
+
+	template<>
+	inline void RedisEncoding<char>::decode(const char* data, size_t size, std::basic_string<char>& string)
+	{
+		string.assign(data, size);
+	}
+
+	template<>
+	inline void RedisEncoding<char>::encode(const std::basic_string<char>& string, std::string& data)
+	{
+		data.append(string.begin(), string.end());
+	}
+
 }
 
 #endif // HIREDISPP_H
