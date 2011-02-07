@@ -76,7 +76,7 @@ namespace hiredispp
 	};
 
 	template<class T, typename CharT>
-	class RedisResult : private RedisEncoding<CharT>, public T
+	class RedisResult : public T
 	{
 		void checkError() const
 		{
@@ -91,7 +91,7 @@ namespace hiredispp
 		std::basic_string<CharT> getString() const
 		{
 			std::basic_string<CharT> s;
-			decode(T::get()->str, T::get()->len, s);
+			RedisEncoding<CharT>::decode(T::get()->str, T::get()->len, s);
 			return s;
 		}
 
@@ -285,58 +285,81 @@ namespace hiredispp
 	};
 
 	template<typename CharT>
-	class RedisCommandBase : private RedisEncoding<CharT>, public std::vector<std::string>
+	class RedisCommandBase
 	{
-		void append(const std::basic_string<CharT>& s)
+		std::vector<std::string> _parts;
+
+		void addPart(const std::basic_string<CharT>& s)
 		{
 			std::string data;
-			encode(s, data);
-			push_back(data);
+			RedisEncoding<CharT>::encode(s, data);
+			_parts.push_back(data);
 		}
 
-		void append(const char* s)
+		void addPart(const char* s)
 		{
 			std::string data(s, s + ::strlen(s));
-			push_back(data);
+			_parts.push_back(data);
 		}
 
 	public:
 		RedisCommandBase(const char* s)
 		{
-			append(s);
+			addPart(s);
 		}
 
 		RedisCommandBase(const std::basic_string<CharT>& s)
 		{
-			append(s);
+			addPart(s);
 		}
 
-		RedisCommandBase(const std::vector<std::vector<char> >& from)
-			: std::vector<std::vector<char> >(from) { }
+		RedisCommandBase(const std::vector<std::string>& parts)
+			: _parts(parts) { }
 
-		RedisCommandBase<CharT>& operator=(const std::vector<std::vector<char> >& from)
+		RedisCommandBase(const RedisCommandBase<CharT>& from)
+			: _parts(from._parts) { }
+
+		std::string operator[](size_t i) const
 		{
-			*this = from;
+			return _parts[i];
+		}
+
+		size_t size() const
+		{
+			return _parts.size();
+		}
+
+		RedisCommandBase<CharT>& operator=(const std::vector<std::string>& parts)
+		{
+			_parts = parts;
+			return *this;
+		}
+
+		RedisCommandBase<CharT>& operator=(const RedisCommandBase<CharT>& from)
+		{
+			_parts = from._parts;
 			return *this;
 		}
 
 		RedisCommandBase<CharT>& operator<<(const std::basic_string<CharT>& s)
 		{
-			append(s);
+			addPart(s);
 			return *this;
 		}
 
 		RedisCommandBase<CharT>& operator<<(const char* s)
 		{
-			append(s);
+			addPart(s);
 			return *this;
 		}
 
 		RedisCommandBase<CharT>& operator<<(const std::vector<std::basic_string<CharT> >& ss)
 		{
+			_parts.reserve(_parts.size() + ss.size());
+
 			for (size_t i = 0; i < ss.size(); ++i)
 			{
-				append(ss[i]);
+				addPart(ss[i]);
 			}
 
 			return *this;
@@ -344,7 +367,7 @@ namespace hiredispp
 
 		template<class T> RedisCommandBase<CharT>& operator<<(const T& v)
 		{
-			append(boost::lexical_cast<std::basic_string<CharT> >(v));
+			addPart(boost::lexical_cast<std::basic_string<CharT> >(v));
 			return *this;
 		}
 	};
@@ -451,6 +474,18 @@ namespace hiredispp
 			return endCommand();
 		}
 
+		void beginExists(const std::basic_string<CharT>& key) const
+		{
+			connect();
+			beginCommand(Command("EXISTS") << key);
+		}
+
+		bool exists(const std::basic_string<CharT>& key) const
+		{
+			beginExists(key);
+			return(((boost::int64_t)endCommand()) != 0);
+		}
+
 		void beginSet(const std::basic_string<CharT>& key, const std::basic_string<CharT>& value) const
 		{
 			connect();
@@ -521,6 +556,18 @@ namespace hiredispp
 		{
 			beginDel(keys);
 			return endCommand();
+		}
+
+		void beginLpush(const std::basic_string<CharT>& key, const std::basic_string<CharT>& value) const
+		{
+			connect();
+			beginCommand(Command("LPUSH") << key << value);
+		}
+
+		void lpush(const std::basic_string<CharT>& key, const std::basic_string<CharT>& value) const
+		{
+			beginLpush(key, value);
+			endCommand();
 		}
 
 		void beginHget(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field) const
@@ -595,6 +642,18 @@ namespace hiredispp
 			return endCommand();
 		}
 
+		void beginSrem(const std::basic_string<CharT>& key, const std::basic_string<CharT>& member) const
+		{
+			connect();
+			beginCommand(Command("SREM") << key << member);
+		}
+
+		boost::int64_t srem(const std::basic_string<CharT>& key, const std::basic_string<CharT>& member) const
+		{
+			beginSrem(key, member);
+			return endCommand();
+		}
+
 		void beginSmembers(const std::basic_string<CharT>& key) const
 		{
 			connect();
@@ -628,6 +687,18 @@ namespace hiredispp
 		boost::int64_t zadd(const std::basic_string<CharT>& key, double score, const std::basic_string<CharT>& member) const
 		{
 			beginZadd(key, score, member);
+			return endCommand();
+		}
+
+		void beginZrem(const std::basic_string<CharT>& key, const std::basic_string<CharT>& member) const
+		{
+			connect();
+			beginCommand(Command("ZREM") << key << member);
+		}
+
+		boost::int64_t zrem(const std::basic_string<CharT>& key, const std::basic_string<CharT>& member) const
+		{
+			beginZrem(key, member);
 			return endCommand();
 		}
 
@@ -679,6 +750,30 @@ namespace hiredispp
 			return endCommand();
 		}
 
+		void beginZrangebyscore(const std::basic_string<CharT>& key,const std::basic_string<CharT>& min, const std::basic_string<CharT>& max) const
+		{
+			connect();
+			beginCommand(Command("ZRANGEBYSCORE") << key << min << max);
+		}
+
+		Reply zrangebyscore(const std::basic_string<CharT>& key, const std::basic_string<CharT>& min, const std::basic_string<CharT>& max) const
+		{
+			beginZrangebyscore(key, min, max);
+			return endCommand();
+		}
+
+		void beginZrevrangebyscore(const std::basic_string<CharT>& key, const std::basic_string<CharT>& max, const std::basic_string<CharT>& min) const
+		{
+			connect();
+			beginCommand(Command("ZREVRANGEBYSCORE") << key << max << min);
+		}
+
+		Reply zrevrangebyscore(const std::basic_string<CharT>& key, const std::basic_string<CharT>& max, const std::basic_string<CharT>& min) const
+		{
+			beginZrevrangebyscore(key, max, min);
+			return endCommand();
+		}
+
 		void beginZcard(const std::basic_string<CharT>& key) const
 		{
 			connect();
@@ -707,23 +802,74 @@ namespace hiredispp
 			::redisAppendCommandArgv(_context, command.size(), argv, argvlen);
 		}
 
-		Reply execute(const Command& command) const
+		Reply doCommand(const Command& command) const
 		{
 			beginCommand(command);
 			return endCommand();
 		}
 
-		void execute(const std::vector<Command>& commands, std::vector<Reply>& replies) const
+		void doPipeline(const std::vector<Command>& commands, std::vector<Reply>& replies) const
 		{
 			for (size_t i = 0; i < commands.size(); ++i)
 			{
 				beginCommand(commands[i]);
 			}
 
+			replies.reserve(commands.size());
+
 			for (size_t i = 0; i < commands.size(); ++i)
 			{
 				replies.push_back(endCommand());
 			}
+		}
+
+		void beginWatch(const std::vector<std::basic_string<CharT> >& keys) const
+		{
+			beginCommand(Command("WATCH") << keys);
+		}
+
+		void watch(const std::vector<std::basic_string<CharT> >& keys) const
+		{
+			beginWatch(keys);
+			endCommand();
+		}
+
+		void watch(const std::basic_string<CharT>& key) const
+		{
+			std::vector<std::basic_string<CharT> > keys;
+			keys.push_back(key);
+			watch(keys);
+		}
+
+		void beginUnwatch() const
+		{
+			beginCommand(Command("UNWATCH"));
+		}
+
+		void unwatch() const
+		{
+			beginUnwatch();
+			endCommand();
+		}
+
+		Reply doTransaction(const std::vector<Command>& commands) const
+		{
+			beginCommand(Command("MULTI"));
+
+			for (size_t i = 0; i < commands.size(); ++i)
+			{
+				beginCommand(commands[i]);
+			}
+
+			beginCommand(Command("EXEC"));
+			endCommand();
+
+			for (size_t i = 0; i < commands.size(); ++i)
+			{
+				endCommand();
+			}
+
+			return endCommand();
 		}
 	};
 
