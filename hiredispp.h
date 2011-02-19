@@ -582,6 +582,18 @@ namespace hiredispp
 			endCommand();
 		}
 
+		void beginLpop(const std::basic_string<CharT>& key) const
+		{
+			connect();
+			beginCommand(Command("LPOP") << key);
+		}
+
+		std::basic_string<CharT> lpop(const std::basic_string<CharT>& key) const
+		{
+			beginLpop(key);
+			return endCommand();
+		}
+
 		void beginRpush(const std::basic_string<CharT>& key, const std::basic_string<CharT>& value) const
 		{
 			connect();
@@ -592,6 +604,30 @@ namespace hiredispp
 		{
 			beginRpush(key, value);
 			endCommand();
+		}
+
+		void beginRpop(const std::basic_string<CharT>& key) const
+		{
+			connect();
+			beginCommand(Command("RPOP") << key);
+		}
+
+		std::basic_string<CharT> rpop(const std::basic_string<CharT>& key) const
+		{
+			beginRpop(key);
+			return endCommand();
+		}
+
+		void beginLindex(const std::basic_string<CharT>& key, boost::int64_t index) const
+		{
+			connect();
+			beginCommand(Command("LINDEX") << key << index);
+		}
+
+		std::basic_string<CharT> lindex(const std::basic_string<CharT>& key, boost::int64_t index) const
+		{
+			beginLindex(key, index);
+			return endCommand();
 		}
 
 		void beginLrange(const std::basic_string<CharT>& key, boost::int64_t start, boost::int64_t end) const
@@ -605,6 +641,19 @@ namespace hiredispp
 			beginLrange(key, start, end);
 			return endCommand();
 		}
+
+		void beginLlen(const std::basic_string<CharT>& key) const
+		{
+			connect();
+			beginCommand(Command("LLEN") << key);
+		}
+
+		boost::int64_t llen(const std::basic_string<CharT>& key) const
+		{
+			beginLlen(key);
+			return endCommand();
+		}
+
 
 		void beginHget(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field) const
 		{
