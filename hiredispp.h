@@ -474,6 +474,18 @@ namespace hiredispp
 			return endCommand();
 		}
 
+		void beginMget(const std::vector<std::basic_string<CharT> >& keys) const
+		{
+			connect();
+			beginCommand(Command("MGET") << keys);
+		}
+
+		Reply mget(const std::vector<std::basic_string<CharT> >& keys) const
+		{
+			beginMget(keys);
+			return endCommand();
+		}
+
 		void beginExists(const std::basic_string<CharT>& key) const
 		{
 			connect();
@@ -570,6 +582,30 @@ namespace hiredispp
 			endCommand();
 		}
 
+		void beginRpush(const std::basic_string<CharT>& key, const std::basic_string<CharT>& value) const
+		{
+			connect();
+			beginCommand(Command("RPUSH") << key << value);
+		}
+
+		void rpush(const std::basic_string<CharT>& key, const std::basic_string<CharT>& value) const
+		{
+			beginRpush(key, value);
+			endCommand();
+		}
+
+		void beginLrange(const std::basic_string<CharT>& key, boost::int64_t start, boost::int64_t end) const
+		{
+			connect();
+			beginCommand(Command("LRANGE") << key << start << end);
+		}
+
+		Reply lrange(const std::basic_string<CharT>& key, boost::int64_t start, boost::int64_t end) const
+		{
+			beginLrange(key, start, end);
+			return endCommand();
+		}
+
 		void beginHget(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field) const
 		{
 			connect();
@@ -640,6 +676,18 @@ namespace hiredispp
 		{
 			beginSadd(key, member);
 			return endCommand();
+		}
+
+		void beginSismember(const std::basic_string<CharT>& key, const std::basic_string<CharT>& member) const
+		{
+			connect();
+			beginCommand(Command("SISMEMBER") << key << member);
+		}
+
+		bool sismember(const std::basic_string<CharT>& key, const std::basic_string<CharT>& member) const
+		{
+			beginSismember(key, member);
+			return ((boost::int64_t)endCommand() == 1);
 		}
 
 		void beginSrem(const std::basic_string<CharT>& key, const std::basic_string<CharT>& member) const
@@ -806,6 +854,19 @@ namespace hiredispp
 		{
 			beginCommand(command);
 			return endCommand();
+		}
+
+		void doPipeline(const std::vector<Command>& commands) const
+		{
+			for (size_t i = 0; i < commands.size(); ++i)
+			{
+				beginCommand(commands[i]);
+			}
+
+			for (size_t i = 0; i < commands.size(); ++i)
+			{
+				endCommand();
+			}
 		}
 
 		void doPipeline(const std::vector<Command>& commands, std::vector<Reply>& replies) const
