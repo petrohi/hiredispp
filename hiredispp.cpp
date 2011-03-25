@@ -19,6 +19,8 @@ namespace hiredispp
         const size_t bufferSize = 512;
         wchar_t buffer[bufferSize];
 
+        string.resize(0);
+
         if (size)
         {
             std::codecvt_base::result result = std::codecvt_base::partial;
@@ -49,6 +51,8 @@ namespace hiredispp
         const size_t bufferSize = 512;
         char buffer[bufferSize];
         size_t size = string.size();
+
+        data.resize(0);
 
         if (size)
         {
