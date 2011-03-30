@@ -20,8 +20,13 @@ namespace hiredispp
     class RedisEncoding
     {
     public:
-        static void decode(const char* data, size_t size, std::basic_string<CharT>& string);
-        static void encode(const std::basic_string<CharT>& string, std::string& data);
+        typedef std::basic_string<CharT> RedisString;
+
+        static void decode(const std::string& data, RedisString& string);
+        static void decode(const char* data, size_t size, RedisString& string);
+
+        static void encode(const RedisString& string, std::string& data);
+        static void encode(const RedisString& string, std::ostream& data);
     };
 
     class RedisException : public std::exception
@@ -1011,15 +1016,48 @@ namespace hiredispp
     typedef RedisBase<wchar_t> wRedis;
 
     template<>
-    inline void RedisEncoding<char>::decode(const char* data, size_t size, std::basic_string<char>& string)
+    inline void RedisEncoding<char>::decode(const char* data, size_t size,
+                                            std::basic_string<char>& string)
     {
         string.assign(data, size);
     }
 
     template<>
-    inline void RedisEncoding<char>::encode(const std::basic_string<char>& string, std::string& data)
+    inline void RedisEncoding<char>::decode(const std::string& data,
+                                            std::basic_string<char>& string)
     {
+        string=data;
+    }
+
+    template<>
+    inline void RedisEncoding<char>::encode(const std::basic_string<char>& string,
+                                            std::string& data)
+    {
+        data.resize(0);
         data.append(string.begin(), string.end());
+    }
+
+    template<>
+    inline void RedisEncoding<char>::encode(const std::basic_string<char>& string,
+                                            std::ostream& data)
+    {
+        data << string;
+    }
+
+    template<>
+    inline void RedisEncoding<wchar_t>::decode(const std::string& data,
+                                               std::basic_string<wchar_t>& string)
+    {
+        decode(data.c_str(), data.size(), string);
+    }
+
+    template<>
+    inline void RedisEncoding<wchar_t>::encode(const std::basic_string<wchar_t>& string,
+                                               std::string& data)
+    {
+        std::ostringstream out;
+        encode(string, static_cast<std::ostream&>(out));
+        data=out.str();
     }
 
 }

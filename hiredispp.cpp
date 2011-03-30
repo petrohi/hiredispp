@@ -46,28 +46,31 @@ namespace hiredispp
     }
 
     template<>
-    void RedisEncoding<wchar_t>::encode(const std::basic_string<wchar_t>& string, std::string& data)
+    void RedisEncoding<wchar_t>::encode(const std::basic_string<wchar_t>& src,
+                                        std::ostream& dst)
     {
         const size_t bufferSize = 512;
         char buffer[bufferSize];
-        size_t size = string.size();
-
-        data.resize(0);
+        size_t size = src.size();
 
         if (size)
         {
-            std::codecvt_base::result result = std::codecvt_base::partial;
+            std::ostream_iterator<char> out(dst);
+            codecvt_base::result result = std::codecvt_base::partial;
             char* bufferIt;
-            const wchar_t* stringBegin = string.c_str();
+            const wchar_t* stringBegin = src.c_str();
             const wchar_t* stringIt;
 
             while (result == std::codecvt_base::partial)
             {
                 std::mbstate_t conversionState = std::mbstate_t();
-                result = std::use_facet<std::codecvt<wchar_t, char, std::mbstate_t> >(std::locale(std::locale::classic(),
-                        new boost::archive::detail::utf8_codecvt_facet)).out(conversionState, stringBegin, stringBegin + size, stringIt, buffer, buffer + bufferSize, bufferIt);
+                result = std::use_facet<std::codecvt<wchar_t, char, std::mbstate_t> >
+                    (std::locale(std::locale::classic(),
+                                 new boost::archive::detail::utf8_codecvt_facet))
+                    .out(conversionState, stringBegin, stringBegin+size, stringIt, buffer,
+                         buffer+bufferSize, bufferIt);
 
-                data.append(buffer, bufferIt);
+                std::copy(buffer, bufferIt, out);
                 size -= (stringIt - stringBegin);
                 stringBegin = stringIt;
             }
@@ -77,4 +80,5 @@ namespace hiredispp
             }
         }
     }
+
 }
