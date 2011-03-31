@@ -189,7 +189,7 @@ namespace hiredispp
         size_t size() const
         {
             checkError();
-
+            
             if (T::get()->type != REDIS_REPLY_ARRAY)
             {
                 throw std::runtime_error("Invalid reply type");
@@ -1044,21 +1044,6 @@ namespace hiredispp
         data << string;
     }
 
-    template<>
-    inline void RedisEncoding<wchar_t>::decode(const std::string& data,
-                                               std::basic_string<wchar_t>& string)
-    {
-        decode(data.c_str(), data.size(), string);
-    }
-
-    template<>
-    inline void RedisEncoding<wchar_t>::encode(const std::basic_string<wchar_t>& string,
-                                               std::string& data)
-    {
-        std::ostringstream out;
-        encode(string, static_cast<std::ostream&>(out));
-        data=out.str();
-    }
 
 }
 

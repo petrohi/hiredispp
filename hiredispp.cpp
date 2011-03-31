@@ -3,6 +3,8 @@
  */
 
 #include "hiredispp.h"
+#include <ostream>
+#include <iterator>
 #include <boost/archive/detail/utf8_codecvt_facet.hpp>
 
 namespace hiredispp
@@ -56,7 +58,7 @@ namespace hiredispp
         if (size)
         {
             std::ostream_iterator<char> out(dst);
-            codecvt_base::result result = std::codecvt_base::partial;
+            std::codecvt_base::result result = std::codecvt_base::partial;
             char* bufferIt;
             const wchar_t* stringBegin = src.c_str();
             const wchar_t* stringIt;
@@ -80,5 +82,22 @@ namespace hiredispp
             }
         }
     }
+
+    template<>
+    inline void RedisEncoding<wchar_t>::decode(const std::string& data,
+                                               std::basic_string<wchar_t>& string)
+    {
+        decode(data.c_str(), data.size(), string);
+    }
+
+    template<>
+    inline void RedisEncoding<wchar_t>::encode(const std::basic_string<wchar_t>& string,
+                                               std::string& data)
+    {
+        std::ostringstream out;
+        encode(string, static_cast<std::ostream&>(out));
+        data=out.str();
+    }
+
 
 }

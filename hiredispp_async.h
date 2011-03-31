@@ -5,14 +5,15 @@
 #include <memory>
 #include <boost/function.hpp>
 
+#define HIREDISPP_DEBUG
+
 namespace hiredispp
 {
-
     class RedisConnectionAsync
     {
     public:
         RedisConnectionAsync(const std::string& host, int port)
-            : _host(host), _port(port)
+            : _host(host), _port(port), _reconnect(false)
         {}
 
         template<typename HandlerC, typename HandlerD>
@@ -96,7 +97,13 @@ namespace hiredispp
 
             void operator() (redisAsyncContext *c, void *reply)
             {
-                _c(*static_cast<ThisType*>(c->data),reply);
+                if (reply) {
+                    Redis::Element el(static_cast<redisReply*>(reply));
+                    _c(*static_cast<ThisType*>(c->data),&el);
+                }
+                else {
+                    _c(*static_cast<ThisType*>(c->data),static_cast<Redis::Element*>(NULL));
+                }
                 delete(this);
             }
 
@@ -123,7 +130,7 @@ namespace hiredispp
             }
             _onDisconnected->operator()(status);
 
-            if (status==REDIS_ERR && _ac) {
+            if (status==REDIS_ERR && _ac && _reconnect) {
                 // reconnect
                 asyncConnect();
             }
@@ -147,13 +154,16 @@ namespace hiredispp
 
         std::string        _host;
         uint16_t           _port;
+        bool               _reconnect;
         redisAsyncContext* _ac;
         std::auto_ptr<BaseOnHandler>   _onConnected;
         std::auto_ptr<BaseOnHandler>   _onDisconnected;
 
         int asyncConnect()
         {
-            std::cout<<"asyncConnect"<<std::endl;
+#ifdef HIREDISPP_DEBUG
+            std::cout<<"asyncConnect()"<<std::endl;
+#endif
             _ac = redisAsyncConnect(_host.c_str(), _port);
             _ac->data = (void*)this;
 
