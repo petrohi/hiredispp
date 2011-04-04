@@ -667,6 +667,18 @@ namespace hiredispp
             return endCommand();
         }
 
+        void beginHdel(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field) const
+        {
+            connect();
+            beginCommand(Command("HDEL") << key << field);
+        }
+
+        boost::int64_t hdel(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field) const
+        {
+            beginHdel(key, field);
+            return endCommand();
+        }
+
         void beginHset(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field, const std::basic_string<CharT>& value) const
         {
             connect();
