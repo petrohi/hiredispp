@@ -8,6 +8,7 @@
 #include <string.h>
 #include <string>
 #include <vector>
+#include <map>
 #include <stdexcept>
 #include <boost/lexical_cast.hpp>
 #include <boost/cstdint.hpp>
@@ -78,6 +79,8 @@ namespace hiredispp
     {
     public:
         static const std::basic_string<CharT> Nil;
+        static const std::basic_string<CharT> InfoSeparator;
+        static const std::basic_string<CharT> InfoCrLf;
     };
 
     template<class T, typename CharT>
@@ -441,6 +444,41 @@ namespace hiredispp
             return Reply(r);
         }
 
+        void beginInfo() const
+        {
+            connect();
+
+            ::redisAppendCommand(_context, "INFO");
+        }
+
+        std::map<std::basic_string<CharT>, std::basic_string<CharT> > info() const
+        {
+            beginInfo();
+
+            std::map<std::basic_string<CharT>, std::basic_string<CharT> > info;
+            std::basic_string<CharT> lines = endCommand();
+
+            size_t i = 0;
+            size_t j = lines.find(RedisConst<CharT>::InfoCrLf);
+
+            while (i != std::basic_string<CharT>::npos)
+            {
+                std::basic_string<CharT> line = lines.substr(i, j == std::basic_string<CharT>::npos ? j : j - i);
+                i = j == std::basic_string<CharT>::npos ? j : j + RedisConst<CharT>::InfoCrLf.size();
+                j = lines.find(RedisConst<CharT>::InfoCrLf, i);
+
+                size_t p = line.find(RedisConst<CharT>::InfoSeparator);
+                
+                if (p != std::basic_string<CharT>::npos &&
+                    p < (line.size() - 1))
+                {
+                    info[line.substr(0, p)] = line.substr(p + 1, std::basic_string<CharT>::npos);
+                }
+            }
+
+            return info;
+        }
+
         void beginPing() const
         {
             connect();
@@ -669,6 +707,18 @@ namespace hiredispp
         std::basic_string<CharT> hget(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field) const
         {
             beginHget(key, field);
+            return endCommand();
+        }
+
+        void beginHdel(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field) const
+        {
+            connect();
+            beginCommand(Command("HDEL") << key << field);
+        }
+
+        boost::int64_t hdel(const std::basic_string<CharT>& key, const std::basic_string<CharT>& field) const
+        {
+            beginHdel(key, field);
             return endCommand();
         }
 
