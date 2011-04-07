@@ -427,6 +427,9 @@ namespace hiredispp
             }
         }
 
+        const std::string& host() const { return _host; }
+        int port() const { return _port; }
+
         Reply endCommand() const
         {
             redisReply* r;
