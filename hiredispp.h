@@ -845,6 +845,30 @@ namespace hiredispp
             return endCommand();
         }
 
+        void beginSunion(const std::vector<std::basic_string<CharT> >& keys) const
+        {
+            connect();
+            beginCommand(Command("SUINION") << keys);
+        }
+
+        Reply sunion(const std::vector<std::basic_string<CharT> >& keys) const
+        {
+            beginSunion(keys);
+            return endCommand();
+        }
+
+        void beginSunion(const std::basic_string<CharT>& key0, const std::basic_string<CharT>& key1) const
+        {
+            connect();
+            beginCommand(Command("SUNION") << key0 << key1);
+        }
+
+        Reply sunion(const std::basic_string<CharT>& key0, const std::basic_string<CharT>& key1) const
+        {
+            beginSunion(key0, key1);
+            return endCommand();
+        }
+
         void beginScard(const std::basic_string<CharT>& key) const
         {
             connect();
