@@ -86,16 +86,6 @@ namespace hiredispp
     template<class T, typename CharT>
     class RedisResult : public T
     {
-        void checkError() const
-        {
-            if (isError())
-            {
-                RedisException e(std::string(T::get()->str, T::get()->len));
-
-                throw e;
-            }
-        }
-
         std::basic_string<CharT> getString() const
         {
             std::basic_string<CharT> s;
@@ -110,6 +100,16 @@ namespace hiredispp
         bool isError() const
         {
             return (T::get()->type == REDIS_REPLY_ERROR);
+        }
+
+        void checkError() const
+        {
+            if (isError())
+            {
+                RedisException e(std::string(T::get()->str, T::get()->len));
+
+                throw e;
+            }
         }
 
         bool isNil() const
