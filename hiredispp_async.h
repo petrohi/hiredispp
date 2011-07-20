@@ -73,7 +73,9 @@ namespace hiredispp
         public:
             OnHandler(Handler handler) : _handler(handler) {}
             virtual void operator() (int arg) {
+#ifdef HIREDISPP_DEBUG
                 std::cout<<"virtual operator("<<arg<<")"<<std::endl;
+#endif
                 _handler(arg);
             }
         };
