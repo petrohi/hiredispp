@@ -268,6 +268,10 @@ namespace hiredispp
 
         RedisReplyBase& operator=(const RedisReplyBase& from)
         {
+            if (&from==this) {
+                return *this;
+            }
+
             release();
 
             _r = from._r;
