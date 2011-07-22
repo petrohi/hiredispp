@@ -13,7 +13,7 @@ namespace hiredispp
     {
     public:
         RedisConnectionAsync(const std::string& host, int port)
-            : _host(host), _port(port), _reconnect(false)
+            : _ac(NULL), _host(host), _port(port), _reconnect(false)
         {}
 
         template<typename HandlerC, typename HandlerD>
@@ -26,14 +26,16 @@ namespace hiredispp
         
         void disconnect()
         {
-            if (_ac) 
+            if (_ac) {
                 redisAsyncDisconnect(_ac);
+                _ac=NULL;
+            }
         }
 
         template<typename CharT, typename ExecHandler>
         void execAsyncCommand(const RedisCommandBase<CharT> & cmd, ExecHandler handler)
         {
-            if (_ac->c.flags & (REDIS_DISCONNECTING | REDIS_FREEING))
+            if (_ac==NULL || _ac->c.flags & (REDIS_DISCONNECTING | REDIS_FREEING))
                 throw RedisException("Can't execute a command, disconnecting or freeing");
 
             const int sz=cmd.size();
@@ -62,7 +64,7 @@ namespace hiredispp
         class BaseOnHandler
         {
         public:
-            virtual void operator() (int)=0;
+            virtual void operator() (const RedisException *ex)=0;
             virtual ~BaseOnHandler() {}
         };
 
@@ -72,11 +74,11 @@ namespace hiredispp
             Handler _handler;
         public:
             OnHandler(Handler handler) : _handler(handler) {}
-            virtual void operator() (int arg) {
+            virtual void operator() (const RedisException *ex) {
 #ifdef HIREDISPP_DEBUG
-                std::cout<<"virtual operator("<<arg<<")"<<std::endl;
+                std::cout<<"virtual operator("<<ex<<")"<<std::endl;
 #endif
-                _handler(arg);
+                _handler(ex);
             }
         };
         
@@ -100,11 +102,12 @@ namespace hiredispp
             void operator() (redisAsyncContext *c, void *reply)
             {
                 if (reply) {
-                    Redis::Element el(static_cast<redisReply*>(reply));
-                    _c(*static_cast<ThisType*>(c->data),&el);
+                    // not a Redis::Reply, to avoid re-release of reply
+                    Redis::Element replyPtr(static_cast<redisReply*>(reply));
+                    _c(*static_cast<ThisType*>(c->data), &replyPtr);
                 }
                 else {
-                    _c(*static_cast<ThisType*>(c->data),static_cast<Redis::Element*>(NULL));
+                    _c(*static_cast<ThisType*>(c->data), static_cast<Redis::Element*>(NULL));
                 }
                 delete(this);
             }
@@ -113,36 +116,36 @@ namespace hiredispp
             Callback _c;
         };
         
-        void onConnected()
+        void onConnected(int status)
         {
-            _onConnected->operator()(0);
+            if (status==REDIS_OK) {
+                _onConnected->operator()(NULL);
+            }
+            else {
+                RedisException ex((_ac && _ac->errstr) ? _ac->errstr : "REDIS_ERR");
+                asyncClose(); // we started ev_read/write, we must stop it.
+                _ac=NULL;
+                _onConnected->operator()(&ex);
+            }
         }
         
         void onDisconnected(int status)
         {
-            if (status==REDIS_ERR) {
-                if (_ac->err) {
-                    // print an error 
-                    printf("Error: %s\n", _ac->errstr);
-                }
-                asyncClose();
+            if (status==REDIS_OK) {
+                _onDisconnected->operator()(NULL);
             }
-            else if (status==REDIS_OK) {
+            else {
+                RedisException ex((_ac && _ac->errstr) ? _ac->errstr : "REDIS_ERR");
                 _ac=NULL;
-            }
-            _onDisconnected->operator()(status);
-
-            if (status==REDIS_ERR && _ac && _reconnect) {
-                // reconnect
-                asyncConnect();
+                _onDisconnected->operator()(&ex);
             }
         }
-        
-        static void connected(const redisAsyncContext *ac)
+
+        static void connected(const redisAsyncContext *ac, int status)
         {
             std::cout<<"static::connected"<<std::endl;
             if (ac && ac->data) {
-                ((RedisConnectionAsync*)(ac->data))->onConnected();
+                ((RedisConnectionAsync*)(ac->data))->onConnected(status);
             }
         }
         
@@ -158,6 +161,7 @@ namespace hiredispp
         uint16_t           _port;
         bool               _reconnect;
         redisAsyncContext* _ac;
+
         std::auto_ptr<BaseOnHandler>   _onConnected;
         std::auto_ptr<BaseOnHandler>   _onDisconnected;
 
@@ -166,17 +170,19 @@ namespace hiredispp
 #ifdef HIREDISPP_DEBUG
             std::cout<<"asyncConnect()"<<std::endl;
 #endif
+            assert(_ac==NULL); 
+
             _ac = redisAsyncConnect(_host.c_str(), _port);
             _ac->data = (void*)this;
 
             if (_ac->err) {
-                std::cout << "Error: " << _ac->errstr << std::endl;
-                // TODO: handle error
+                throw RedisException((std::string)"RedisAsyncConnect: "+_ac->errstr);
+            }
+            if (redisAsyncSetConnectCallback(_ac, &connected)!=REDIS_OK ||
+                redisAsyncSetDisconnectCallback(_ac, &disconnected)!=REDIS_OK) {
+                throw RedisException((std::string)"RedisAsyncConnect: Can't register callbacks");
             }
 
-            if (redisAsyncSetConnectCallback(_ac, connected)!=REDIS_OK ||
-                redisAsyncSetDisconnectCallback(_ac, disconnected)!=REDIS_OK)
-                std::cout << "Can't register callbacks" << std::endl;
             redisLibevAttach(EV_DEFAULT, _ac);
             // actually start io proccess
             ev_io_start(EV_DEFAULT, &((((redisLibevEvents*)(_ac->ev.data)))->rev));
@@ -185,10 +191,13 @@ namespace hiredispp
 
         void asyncClose()
         {
-            ev_io_stop(EV_DEFAULT, &((((redisLibevEvents*)(_ac->ev.data)))->rev));
-            ev_io_stop(EV_DEFAULT, &((((redisLibevEvents*)(_ac->ev.data)))->wev));
-            // redisLibevCleanup(_ac->_adapter_data);
-            close(_ac->c.fd);
+            if (_ac) {
+                ev_io_stop(EV_DEFAULT, &((((redisLibevEvents*)(_ac->ev.data)))->rev));
+                ev_io_stop(EV_DEFAULT, &((((redisLibevEvents*)(_ac->ev.data)))->wev));
+                // redisLibevCleanup(_ac->_adapter_data);
+                // TODO: should we close it or not???
+                // close(_ac->c.fd);
+            }
         }
     };
 
