@@ -4,6 +4,7 @@
 #include <hiredis/adapters/libev.h>
 #include <memory>
 #include <boost/function.hpp>
+#include <boost/shared_ptr.hpp>
 
 #define HIREDISPP_DEBUG
 
@@ -64,7 +65,7 @@ namespace hiredispp
         class BaseOnHandler
         {
         public:
-            virtual void operator() (const RedisException *ex)=0;
+            virtual void operator() (boost::shared_ptr<RedisException> &ex)=0;
             virtual ~BaseOnHandler() {}
         };
 
@@ -74,9 +75,9 @@ namespace hiredispp
             Handler _handler;
         public:
             OnHandler(Handler handler) : _handler(handler) {}
-            virtual void operator() (const RedisException *ex) {
+            virtual void operator() (boost::shared_ptr<RedisException> &ex) {
 #ifdef HIREDISPP_DEBUG
-                std::cout<<"virtual operator("<<ex<<")"<<std::endl;
+                std::cout<<"virtual operator("<<(ex.get() ? "EXCEPTION" : "NULL")<<")"<<std::endl;
 #endif
                 _handler(ex);
             }
@@ -118,27 +119,23 @@ namespace hiredispp
         
         void onConnected(int status)
         {
-            if (status==REDIS_OK) {
-                _onConnected->operator()(NULL);
-            }
-            else {
-                RedisException ex((_ac && _ac->errstr) ? _ac->errstr : "REDIS_ERR");
+            boost::shared_ptr<RedisException> ex;
+            if (status!=REDIS_OK) {
+                ex.reset(new RedisException((_ac && _ac->errstr) ? _ac->errstr : "REDIS_ERR"));
                 asyncClose(); // we started ev_read/write, we must stop it.
                 _ac=NULL;
-                _onConnected->operator()(&ex);
             }
+            _onConnected->operator()(ex);
         }
         
         void onDisconnected(int status)
         {
-            if (status==REDIS_OK) {
-                _onDisconnected->operator()(NULL);
-            }
-            else {
-                RedisException ex((_ac && _ac->errstr) ? _ac->errstr : "REDIS_ERR");
+            boost::shared_ptr<RedisException> ex;
+            if (status!=REDIS_OK) {
+                ex.reset(new RedisException((_ac && _ac->errstr) ? _ac->errstr : "REDIS_ERR"));
                 _ac=NULL;
-                _onDisconnected->operator()(&ex);
             }
+            _onDisconnected->operator()(ex);
         }
 
         static void connected(const redisAsyncContext *ac, int status)
@@ -180,10 +177,13 @@ namespace hiredispp
             }
             if (redisAsyncSetConnectCallback(_ac, &connected)!=REDIS_OK ||
                 redisAsyncSetDisconnectCallback(_ac, &disconnected)!=REDIS_OK) {
-                throw RedisException((std::string)"RedisAsyncConnect: Can't register callbacks");
+                throw RedisException("RedisAsyncConnect: Can't register callbacks");
             }
 
-            redisLibevAttach(EV_DEFAULT, _ac);
+            if (redisLibevAttach(EV_DEFAULT, _ac)!=REDIS_OK) {
+                throw RedisException("redisLibevAttach: nothing should be attached when something is already attached");
+            }
+
             // actually start io proccess
             ev_io_start(EV_DEFAULT, &((((redisLibevEvents*)(_ac->ev.data)))->rev));
             ev_io_start(EV_DEFAULT, &((((redisLibevEvents*)(_ac->ev.data)))->wev));

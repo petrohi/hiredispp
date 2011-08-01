@@ -35,6 +35,8 @@ namespace hiredispp
         std::string _what;
 
     public:
+        RedisException(const char* cstr)
+            : _what(cstr) { }
         RedisException(const std::string& what)
             : _what(what) { }
 
