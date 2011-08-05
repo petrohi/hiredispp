@@ -317,6 +317,8 @@ namespace hiredispp
         }
 
     public:
+        RedisCommandBase() {}
+
         RedisCommandBase(const char* s)
         {
             addPart(s);
