@@ -335,7 +335,7 @@ namespace hiredispp
         RedisCommandBase(const RedisCommandBase<CharT>& from)
             : _parts(from._parts) { }
 
-        std::string operator[](size_t i) const
+        const std::string& operator[](size_t i) const
         {
             return _parts[i];
         }
